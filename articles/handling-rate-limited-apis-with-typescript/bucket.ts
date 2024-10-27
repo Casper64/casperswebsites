@@ -1,4 +1,4 @@
-type Consumer = () => void;
+export type Consumer<T = void> = () => T;
 
 export class TokenBucket {
   public capacity: number;
@@ -16,7 +16,7 @@ export class TokenBucket {
   }
 
   /** Try to consume a token, else place it in the bucket */
-  public tryConsume(token: Consumer) {
+  public tryConsume(token: () => void) {
     if (this.beingProcessed < this.capacity) {
       this.beingProcessed++;
       token();
@@ -40,6 +40,10 @@ export class TokenBucket {
       clearTimeout(this.timeoutId);
       this.timeoutId = null;
     }
+  }
+
+  public getBeingProcessed() {
+    return this.beingProcessed
   }
 
   private emptyBucket() {

@@ -6,3 +6,12 @@ export const api = {
     return logger(n);
   },
 };
+
+export const usersApi = {
+  users: {
+    async getUsers() {
+      console.log("Retrieving users...");
+      return [{ id: "test", name: "user" }]
+    }
+  }
+};
