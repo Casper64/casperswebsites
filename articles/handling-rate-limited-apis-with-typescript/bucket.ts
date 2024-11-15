@@ -16,7 +16,7 @@ export class TokenBucket {
   }
 
   /** Try to consume a token, else place it in the bucket */
-  public tryConsume(token: () => void) {
+  public tryConsume<T>(token: Consumer<T>): void {
     if (this.beingProcessed < this.capacity) {
       this.beingProcessed++;
       token();
@@ -43,7 +43,7 @@ export class TokenBucket {
   }
 
   public getBeingProcessed() {
-    return this.beingProcessed
+    return this.beingProcessed;
   }
 
   private emptyBucket() {
