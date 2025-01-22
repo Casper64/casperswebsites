@@ -1,24 +1,7 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig } from "vite";
 import { resolve } from "path";
 
-export default defineConfig((config) => {
-  let htmlFiles: string[];
-
-  // if (config.mode === "development") {
-  //     htmlFiles = globSync("**/*.html", {
-  //         cwd: resolve(__dirname, "./wwwroot"),
-  //     });
-  // } else {
-  //     htmlFiles = globSync("wwwroot/**/*.html", {
-  //         cwd: resolve(__dirname, "./"),
-  //     });
-  // }
-
-  const input: any = {};
-  // htmlFiles.forEach((e: string, i: number) => {
-  //     input[`app_${i}`] = resolve(e);
-  // });
-
+export default defineConfig((_config) => {
   return {
     base: "./",
     root: "public",

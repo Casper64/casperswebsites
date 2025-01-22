@@ -1,15 +1,22 @@
-import { LitElement, TemplateResult, css, html } from "lit";
-import { customElement } from "lit/decorators.js";
+import { createRouter, Route } from "./lib/router";
+import "./pages/home";
+import "./pages/other";
 
-@customElement("app-root")
-export class AppRoot extends LitElement {
-  protected render(): TemplateResult {
-    return html`<p>Hello world!</p>`;
-  }
-}
+const routes: Route[] = [
+  {
+    path: "",
+    component: "main-layout",
+    children: [
+      {
+        path: "",
+        component: "home-page",
+      },
+      {
+        path: "other",
+        component: "other-page",
+      },
+    ],
+  },
+];
 
-declare global {
-  interface HTMLElementTagNameMap {
-    "app-root": AppRoot;
-  }
-}
+createRouter(document.getElementById("app")!, routes);
