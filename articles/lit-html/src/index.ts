@@ -1,22 +1,4 @@
-import { createRouter, Route } from "./lib/router";
-import "./pages/home";
-import "./pages/other";
+import { router } from "./routes";
 
-const routes: Route[] = [
-  {
-    path: "",
-    component: "main-layout",
-    children: [
-      {
-        path: "",
-        component: "home-page",
-      },
-      {
-        path: "other",
-        component: "other-page",
-      },
-    ],
-  },
-];
-
-createRouter(document.getElementById("app")!, routes);
+const root = document.getElementById("app")!;
+router.mount(root);

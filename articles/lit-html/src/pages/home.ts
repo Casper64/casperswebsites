@@ -8,6 +8,7 @@ export class HomePage extends LitElement {
     return html`
       <h1>Home page</h1>
       <my-counter></my-counter>
+      <slot></slot>
     `;
   }
 }

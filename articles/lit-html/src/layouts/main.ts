@@ -1,17 +1,39 @@
 import { html, LitElement, TemplateResult } from "lit";
-import { customElement } from "lit/decorators.js";
+import { customElement, state } from "lit/decorators.js";
+import { router } from "../routes";
 
 @customElement("main-layout")
 export class MainLayout extends LitElement {
+  @state()
+  private _i = 0;
+
   protected render(): TemplateResult {
+    console.log("rerneder main!");
     return html`<nav>
-        <a href="/">Home</a>
-        <a href="/about">About</a>
+        <!-- <a href="/">Home</a> -->
+        <!-- <a href="/about">About</a> -->
+        <button
+          @click=${() => {
+            router.render("/");
+          }}
+        >
+          Home
+        </button>
+        <button
+          @click=${() => {
+            console.log("render other");
+            router.render(`/other-${this._i}`);
+          }}
+        >
+          Other
+        </button>
       </nav>
       <main>
         <slot></slot>
       </main>
-      <footer></footer> `;
+      <footer>
+        <my-counter></my-counter>
+      </footer> `;
   }
 }
 
