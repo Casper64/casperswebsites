@@ -18,7 +18,17 @@ const routes: Route[] = [
         component: "other-page",
       },
     ],
+    //
   },
 ];
 
 export const router = new Router(routes);
+
+// slots: {
+//   navigation: {
+//     default: '',
+//     children: [{
+//       path: ""
+//     }]
+//   }
+// }

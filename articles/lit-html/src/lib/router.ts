@@ -31,52 +31,72 @@ function parseRoute(
     childRoutes: Record<string, TransformedRoute>,
     parentPath = ""
   ) => {
-    const segment = innerSegments.shift();
+    // base case when there are no child routes
+    if (!Object.keys(childRoutes).length) {
+      // check if there are still any segments left. If that is the case
+      // the DFS could not resolve all segments meaning a proper match is not found
+      if (innerSegments.length) throw new Error("404");
 
-    const routeKeys = Object.keys(childRoutes);
-    const matchingRoutes = {} as Record<string, ParsedRoute>;
-
-    for (let i = 0; i < routeKeys.length; i++) {
-      const key = routeKeys[i];
-
-      const isNormalRoute = segment === key;
-      const isDynamic = segment && key.startsWith(":");
-
-      if (isNormalRoute || isDynamic) {
-        const route = childRoutes[key];
-        const newPath = `${parentPath}/${route.path}`;
-        // recursively get children
-        const children = route.children
-          ? matchSegment([...innerSegments], route.children, newPath)
-          : {};
-
-        matchingRoutes[key] = {
-          path: newPath,
-          component: route.component,
-          parameter: isDynamic ? segment : undefined,
-          children,
-        };
-      }
+      return {};
     }
 
-    if (!Object.keys(matchingRoutes).length) {
+    const segment = innerSegments.shift();
+    const matchingRoutes = {} as Record<string, ParsedRoute>;
+
+    if (segment) {
+      const routeKeys = Object.keys(childRoutes);
+
+      for (let i = 0; i < routeKeys.length; i++) {
+        const key = routeKeys[i];
+
+        const isNormalRoute = segment === key;
+        const isDynamic = segment && key.startsWith(":");
+
+        if (isNormalRoute || isDynamic) {
+          const route = childRoutes[key];
+          const newPath = `${parentPath}/${route.path}`;
+          // recursively get children
+          const children = matchSegment(
+            [...innerSegments],
+            route.children,
+            newPath
+          );
+
+          matchingRoutes[key] = {
+            path: newPath,
+            component: route.component,
+            parameter: isDynamic ? segment : undefined,
+            children,
+          };
+        }
+      }
+    }
+    // if there is no segment left OR no route was found. Check if a default route
+    // exists and then render that route
+    if (!segment || !Object.keys(matchingRoutes).length) {
       // no matching routes found. Render the "default" path if it exists
       const defaultRoute = childRoutes[""];
-      if (defaultRoute) {
-        const nextSegments = segment
-          ? [segment, ...innerSegments]
-          : innerSegments;
-
-        // recursively get children
-        const children = defaultRoute.children
-          ? matchSegment(nextSegments, defaultRoute.children, parentPath)
-          : {};
-        matchingRoutes[""] = {
-          path: parentPath,
-          component: defaultRoute.component,
-          children,
-        };
+      if (defaultRoute === undefined) {
+        // there is matching route. But the route has children. That means
+        // that the end of DFS is not reached, meaning the route does not exist.
+        throw new Error("404");
       }
+      //
+      const nextSegments = segment
+        ? [segment, ...innerSegments]
+        : innerSegments;
+
+      // recursively get children
+      const children = matchSegment(
+        nextSegments,
+        defaultRoute.children,
+        parentPath
+      );
+      matchingRoutes[""] = {
+        path: parentPath,
+        component: defaultRoute.component,
+        children,
+      };
     }
 
     return matchingRoutes;

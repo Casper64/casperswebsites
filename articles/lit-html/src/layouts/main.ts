@@ -1,14 +1,10 @@
 import { html, LitElement, TemplateResult } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement } from "lit/decorators.js";
 import { router } from "../routes";
 
 @customElement("main-layout")
 export class MainLayout extends LitElement {
-  @state()
-  private _i = 0;
-
   protected render(): TemplateResult {
-    console.log("rerneder main!");
     return html`<nav>
         <!-- <a href="/">Home</a> -->
         <!-- <a href="/about">About</a> -->
@@ -21,19 +17,23 @@ export class MainLayout extends LitElement {
         </button>
         <button
           @click=${() => {
-            console.log("render other");
-            router.render(`/other-${this._i}`);
+            router.render("/other");
           }}
         >
           Other
+        </button>
+        <button
+          @click=${() => {
+            router.render("/error");
+          }}
+        >
+          Not found
         </button>
       </nav>
       <main>
         <slot></slot>
       </main>
-      <footer>
-        <my-counter></my-counter>
-      </footer> `;
+      <footer></footer> `;
   }
 }
 
