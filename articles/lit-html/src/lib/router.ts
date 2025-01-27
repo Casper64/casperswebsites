@@ -7,128 +7,96 @@ export type Route = {
 type TransformedRoute = {
   path: string;
   component: keyof HTMLElementTagNameMap;
-  children: Record<string, TransformedRoute>;
+  children?: Map<string, TransformedRoute>;
 };
 
 type ParsedRoute = {
   path: string;
   parameter?: string;
   component: keyof HTMLElementTagNameMap;
-  root?: HTMLElement;
-  children: Record<string, ParsedRoute>;
+  root?: WeakRef<HTMLElement>;
+  child?: ParsedRoute;
 };
 
 function parseRoute(
   path: string,
-  routes: Record<string, TransformedRoute>
-): Record<string, ParsedRoute> {
+  routes: Map<string, TransformedRoute>
+): ParsedRoute | undefined {
   // get all segments between "/" in the `path` and remove any empty string
   const segments = path.split("/").filter((segment) => !!segment.length);
 
   /** Recursively match a route segment against a subset of routes */
   const matchSegment = (
     innerSegments: string[],
-    childRoutes: Record<string, TransformedRoute>,
-    parentPath = ""
-  ) => {
+    childRoutes?: Map<string, TransformedRoute>
+  ): ParsedRoute | undefined => {
     // base case when there are no child routes
-    if (!Object.keys(childRoutes).length) {
+    if (!childRoutes || !childRoutes.size) {
       // check if there are still any segments left. If that is the case
       // the DFS could not resolve all segments meaning a proper match is not found
       if (innerSegments.length) throw new Error("404");
-
-      return {};
+      return;
     }
 
-    const segment = innerSegments.shift();
-    const matchingRoutes = {} as Record<string, ParsedRoute>;
-
+    const segment = innerSegments.at(0);
     if (segment) {
-      const routeKeys = Object.keys(childRoutes);
-
-      for (let i = 0; i < routeKeys.length; i++) {
-        const key = routeKeys[i];
-
+      for (const [key, route] of childRoutes.entries()) {
         const isNormalRoute = segment === key;
         const isDynamic = segment && key.startsWith(":");
 
         if (isNormalRoute || isDynamic) {
-          const route = childRoutes[key];
-          const newPath = `${parentPath}/${route.path}`;
-          // recursively get children
-          const children = matchSegment(
-            [...innerSegments],
-            route.children,
-            newPath
-          );
-
-          matchingRoutes[key] = {
-            path: newPath,
+          return {
+            path: route.path,
             component: route.component,
             parameter: isDynamic ? segment : undefined,
-            children,
+            // recursively get children and remove the first segment
+            child: matchSegment(innerSegments.slice(1), route.children),
           };
         }
       }
     }
-    // if there is no segment left OR no route was found. Check if a default route
-    // exists and then render that route
-    if (!segment || !Object.keys(matchingRoutes).length) {
-      // no matching routes found. Render the "default" path if it exists
-      const defaultRoute = childRoutes[""];
-      if (defaultRoute === undefined) {
-        // there is matching route. But the route has children. That means
-        // that the end of DFS is not reached, meaning the route does not exist.
-        throw new Error("404");
-      }
-      //
-      const nextSegments = segment
-        ? [segment, ...innerSegments]
-        : innerSegments;
 
-      // recursively get children
-      const children = matchSegment(
-        nextSegments,
-        defaultRoute.children,
-        parentPath
-      );
-      matchingRoutes[""] = {
-        path: parentPath,
-        component: defaultRoute.component,
-        children,
-      };
+    // no matching routes found. Render the "default" path if it exists
+    const defaultRoute = childRoutes.get("");
+    if (defaultRoute === undefined) {
+      // there is no matching route. But the route has children. That means
+      // that the end of DFS is not reached, meaning the route does not exist.
+      throw new Error("404");
     }
 
-    return matchingRoutes;
+    return {
+      path: defaultRoute.path,
+      component: defaultRoute.component,
+      // recursively get children
+      child: matchSegment(innerSegments, defaultRoute.children),
+    };
   };
 
   return matchSegment(segments, routes);
 }
 
 export class Router {
-  private _routes: Record<string, TransformedRoute>;
+  private _routes: Map<string, TransformedRoute>;
   private _rootElement?: HTMLElement;
-  private _currentRoutes: Record<string, ParsedRoute> = {};
-  private _DOMNodes = new WeakSet<HTMLElement>();
+  private _currentRoute?: ParsedRoute;
 
   constructor(routes: Route[]) {
-    // recursively convert the array into an object
-    const transform = (routes?: Route[]): Record<string, TransformedRoute> => {
-      if (!routes) return {};
-
-      const entries = routes.map((route) => [
-        route.path,
-        {
+    // recursively convert the array into an object to make it faster to lookup
+    // routes in `parseRoute`
+    const transform = (routes: Route[]): Map<string, TransformedRoute> => {
+      const routeMap = new Map<string, TransformedRoute>();
+      for (let i = 0; i < routes.length; i++) {
+        const route = routes[i];
+        routeMap.set(route.path, {
           ...route,
-          children: transform(route.children),
-        },
-      ]);
+          children: route.children ? transform(route.children) : undefined,
+        });
+      }
 
-      return Object.fromEntries(entries);
+      return routeMap;
     };
 
     this._routes = transform(routes);
-    console.log(this._routes);
   }
 
   public mount(rootElement: HTMLElement) {
@@ -142,83 +110,89 @@ export class Router {
     /**
      * render steps:
      * - validate the new route (does it exist?)
-     * - set the root node(s) to be the deepest node that has to be changed
+     * - set the root node to be the deepest node that has to be changed
      * - match sub routes and create children for the root node
      * - insert the new root node in the correct place in the DOM
      */
 
     // TODO: make sure this method isn't executed simultaneously
-    console.time("render");
-    const parsedRoutes = parseRoute(path, this._routes);
-    if (!Object.keys(parsedRoutes).length) {
+    console.time("matching");
+    const parsedRoute = parseRoute(path, this._routes);
+    if (!parsedRoute) {
       // no matching routes found!
       throw new Error(`No matching routes for path "${path}"`);
     }
+    console.timeEnd("matching");
 
-    this._traverseRoutes(this._rootElement, parsedRoutes, this._currentRoutes);
-    this._currentRoutes = parsedRoutes;
+    console.time("render");
+    this._traverseRoutes(this._rootElement, parsedRoute, this._currentRoute);
     console.timeEnd("render");
+
+    this._currentRoute = parsedRoute;
   }
 
-  /** Traverse the a `routes` node and render the result to the DOM */
+  /**
+   * Traverses the route and its children to find the deepest node that needs
+   * to be changed / rerendered. Then it rerenders the node and all its children
+   */
   private _traverseRoutes(
     rootElement: HTMLElement,
-    routes: Record<string, ParsedRoute>,
-    currentRoutes: Record<string, ParsedRoute>
+    route: ParsedRoute,
+    oldRoute?: ParsedRoute
   ) {
-    const entries = Object.entries(routes);
-    for (let i = 0; i < entries.length; i++) {
-      const [key, route] = entries[i];
+    let removeOldNode = true;
 
-      const oldRoute = currentRoutes[key];
-      const shouldBeChanged =
-        oldRoute === undefined || oldRoute.parameter !== route.parameter;
+    const shouldBeChanged = oldRoute?.path !== route.path;
+    const parametersChanged = route.parameter !== oldRoute?.parameter;
+    // check if the node still exists in the DOM. If not it should be rerendered
+    const oldRootNode = oldRoute?.root?.deref();
+    const isDisconnectedFromDOM = oldRoute?.root && !oldRootNode?.isConnected;
 
-      if (shouldBeChanged) {
-        const newElement = this._createElement(route);
-        route.root = newElement;
-        // recursively attach children
-        this._traverseRoutes(
-          newElement,
-          route.children,
-          oldRoute?.children ?? {}
-        );
+    if (shouldBeChanged || parametersChanged || isDisconnectedFromDOM) {
+      // create a document framgent so the DOM changes can be applied at once
+      const rootFragment = document.createDocumentFragment();
+      this._doRender(rootFragment, route);
+      rootElement.appendChild(rootFragment);
+    } else {
+      // old root is the same, so it should not be removed
+      removeOldNode = false;
 
-        if (oldRoute?.root && this._DOMNodes.has(oldRoute.root)) {
-          // remove the old node from the DOM
-          oldRoute.root.remove();
-        }
+      // set the root element to be the old root element
+      const oldRootElement = oldRootNode!!;
+      route.root = new WeakRef(oldRootElement);
 
-        rootElement.appendChild(newElement);
-      } else {
-        // route should stay the same. Make sure that the route is still present in the DOM.
-        // else rerender it.
-        route.root = oldRoute.root!;
-        // recursively attach children
-        this._traverseRoutes(
-          oldRoute.root!,
-          route.children,
-          oldRoute?.children ?? {}
-        );
+      // if the route has a child we should check if any of its children have changed
+      if (route.child) {
+        this._traverseRoutes(oldRootElement, route.child, oldRoute?.child);
       }
-      // remove old route from the object
-      if (oldRoute) delete currentRoutes[key];
     }
 
-    // all entries that are left in the currentRoutes object don't exist in the
-    // new matched route: they can all be removed from the DOM
-    const leftOverEntries = Object.entries(currentRoutes);
-    for (let i = 0; i < leftOverEntries.length; i++) {
-      const [_key, route] = leftOverEntries[i];
-      route?.root?.remove();
+    if (removeOldNode) {
+      // remove the old node from the DOM
+      oldRootNode?.remove();
     }
+  }
+
+  /** Render a `route` and its children then append it to the `rootElement` */
+  private _doRender(
+    rootElement: HTMLElement | DocumentFragment,
+    route: ParsedRoute
+  ) {
+    const newElement = this._createElement(route);
+    // if the route has a child we need to rerender all children below it
+    if (route.child) this._doRender(newElement, route.child);
+
+    rootElement.appendChild(newElement);
   }
 
   private _createElement(route: ParsedRoute): HTMLElement {
     const element = document.createElement(route.component);
+    // TODO: set parameters on created class
     // element.parameters = { other: route.parameter };
-    this._DOMNodes.add(element);
-    route.root = element;
+
+    // use a weak ref so the element can be garbage collected when it's removed from the DOM
+    // because it is no longer referenced anywhere.
+    route.root = new WeakRef(element);
     return element;
   }
 }
