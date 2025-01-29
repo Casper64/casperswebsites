@@ -32,5 +32,9 @@ export default defineConfig((_config) => {
       strictPort: true,
       port: 3000,
     },
+    test: {
+      include: ["test/**/*.test.ts"],
+      root: ".",
+    },
   };
 });

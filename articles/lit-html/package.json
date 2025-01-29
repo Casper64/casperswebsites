@@ -3,14 +3,18 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build"
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest --run",
+    "test:watch": "vitest"
   },
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
     "@types/node": "^22.10.7",
+    "jsdom": "^26.0.0",
     "lit": "^3.2.1",
-    "vite": "^6.0.11"
+    "vite": "^6.0.11",
+    "vitest": "^3.0.4"
   }
 }

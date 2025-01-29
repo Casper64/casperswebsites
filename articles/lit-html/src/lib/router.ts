@@ -79,6 +79,7 @@ export class Router {
   private _routes: Map<string, TransformedRoute>;
   private _rootElement?: HTMLElement;
   private _currentRoute?: ParsedRoute;
+  private _DOMChanges?: Promise<[ParsedRoute, (() => void) | undefined]>;
 
   constructor(routes: Route[]) {
     // recursively convert the array into an object to make it faster to lookup
@@ -104,31 +105,37 @@ export class Router {
     this.render("/");
   }
 
-  public render(path: string) {
-    if (!this._rootElement) throw new Error("Call mount first");
-    console.log("RENDER", path);
-    /**
-     * render steps:
-     * - validate the new route (does it exist?)
-     * - set the root node to be the deepest node that has to be changed
-     * - match sub routes and create children for the root node
-     * - insert the new root node in the correct place in the DOM
-     */
+  public async render(path: string) {
+    const renderPromise = new Promise<[ParsedRoute, (() => void) | undefined]>(
+      (resolve, reject) => {
+        if (!this._rootElement) reject(new Error("Call mount first"));
 
-    // TODO: make sure this method isn't executed simultaneously
-    console.time("matching");
-    const parsedRoute = parseRoute(path, this._routes);
-    if (!parsedRoute) {
-      // no matching routes found!
-      throw new Error(`No matching routes for path "${path}"`);
-    }
-    console.timeEnd("matching");
+        const parsedRoute = parseRoute(path, this._routes);
+        if (!parsedRoute) {
+          // no matching routes found!
+          throw new Error(`No matching routes for path "${path}"`);
+        }
+        const result = this._traverseRoutes(
+          this._rootElement!,
+          parsedRoute,
+          this._currentRoute
+        );
+        resolve([parsedRoute, result]);
+      }
+    );
+    // keep track of the promise
+    this._DOMChanges = renderPromise;
+    const result = await renderPromise;
+    // check if the promise we started is the same as the one that resolved
+    // if not that means render was called again before the previous render was done
+    // we can ignore the result in that case
+    if (this._DOMChanges !== renderPromise) return;
 
-    console.time("render");
-    this._traverseRoutes(this._rootElement, parsedRoute, this._currentRoute);
-    console.timeEnd("render");
-
+    const [parsedRoute, applyChanges] = result;
     this._currentRoute = parsedRoute;
+
+    applyChanges?.();
+    return parsedRoute;
   }
 
   /**
@@ -139,9 +146,7 @@ export class Router {
     rootElement: HTMLElement,
     route: ParsedRoute,
     oldRoute?: ParsedRoute
-  ) {
-    let removeOldNode = true;
-
+  ): (() => void) | undefined {
     const shouldBeChanged = oldRoute?.path !== route.path;
     const parametersChanged = route.parameter !== oldRoute?.parameter;
     // check if the node still exists in the DOM. If not it should be rerendered
@@ -149,13 +154,17 @@ export class Router {
     const isDisconnectedFromDOM = oldRoute?.root && !oldRootNode?.isConnected;
 
     if (shouldBeChanged || parametersChanged || isDisconnectedFromDOM) {
-      // create a document framgent so the DOM changes can be applied at once
-      const rootFragment = document.createDocumentFragment();
-      this._doRender(rootFragment, route);
-      rootElement.appendChild(rootFragment);
+      return () => {
+        // remove the old root node and all its children
+        oldRootNode?.remove();
+
+        // create a document framgent so the DOM changes can be applied at once
+        const rootFragment = document.createDocumentFragment();
+        this._doRender(rootFragment, route);
+        rootElement.appendChild(rootFragment);
+      };
     } else {
       // old root is the same, so it should not be removed
-      removeOldNode = false;
 
       // set the root element to be the old root element
       const oldRootElement = oldRootNode!!;
@@ -163,14 +172,15 @@ export class Router {
 
       // if the route has a child we should check if any of its children have changed
       if (route.child) {
-        this._traverseRoutes(oldRootElement, route.child, oldRoute?.child);
+        return this._traverseRoutes(
+          oldRootElement,
+          route.child,
+          oldRoute?.child
+        );
       }
     }
 
-    if (removeOldNode) {
-      // remove the old node from the DOM
-      oldRootNode?.remove();
-    }
+    // no changes need to be made
   }
 
   /** Render a `route` and its children then append it to the `rootElement` */
