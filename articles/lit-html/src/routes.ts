@@ -3,6 +3,7 @@ import { Route, Router } from "./lib/router";
 import "./layouts/main";
 import "./pages/home";
 import "./pages/other";
+import "./pages/dynamic";
 
 const routes: Route[] = [
   {
@@ -16,6 +17,15 @@ const routes: Route[] = [
       {
         path: "other",
         component: "other-page",
+      },
+      {
+        path: "dynamic",
+        children: [
+          {
+            path: ":id",
+            component: "dynamic-page",
+          },
+        ],
       },
     ],
     //

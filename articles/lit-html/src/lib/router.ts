@@ -1,19 +1,21 @@
+import { LitElement } from "lit";
+
 export type Route = {
   path: string;
-  component: keyof HTMLElementTagNameMap;
+  component?: keyof HTMLElementTagNameMap;
   children?: Route[];
 };
 
 type TransformedRoute = {
   path: string;
-  component: keyof HTMLElementTagNameMap;
+  component?: keyof HTMLElementTagNameMap;
   children?: Map<string, TransformedRoute>;
 };
 
 type ParsedRoute = {
   path: string;
   parameter?: string;
-  component: keyof HTMLElementTagNameMap;
+  component?: keyof HTMLElementTagNameMap;
   root?: WeakRef<HTMLElement>;
   child?: ParsedRoute;
 };
@@ -186,19 +188,35 @@ export class Router {
   /** Render a `route` and its children then append it to the `rootElement` */
   private _doRender(
     rootElement: HTMLElement | DocumentFragment,
-    route: ParsedRoute
+    route: ParsedRoute,
+    parameters: Record<string, string> = {}
   ) {
-    const newElement = this._createElement(route);
-    // if the route has a child we need to rerender all children below it
-    if (route.child) this._doRender(newElement, route.child);
+    if (route.component) {
+      const newElement = this._createElement(route, parameters);
+      // if the route has a child we need to rerender all children below it
+      if (route.child) this._doRender(newElement, route.child, parameters);
 
-    rootElement.appendChild(newElement);
+      rootElement.appendChild(newElement);
+    } else if (route.child) {
+      this._doRender(rootElement, route.child, parameters);
+    }
   }
 
-  private _createElement(route: ParsedRoute): HTMLElement {
+  private _createElement(
+    route: ParsedRoute,
+    parameters: Record<string, string> = {}
+  ): HTMLElement {
+    if (!route.component) throw new Error("Component is missing");
+
     const element = document.createElement(route.component);
-    // TODO: set parameters on created class
-    // element.parameters = { other: route.parameter };
+
+    if (isDynamicRouteElement(element, route)) {
+      // remove the ":" from the parameter name
+      const paramName = route.path.slice(1);
+      parameters[paramName] = route.parameter!;
+      // set the parameters on the element
+      element.setParameters(parameters as unknown as any);
+    }
 
     // use a weak ref so the element can be garbage collected when it's removed from the DOM
     // because it is no longer referenced anywhere.
@@ -206,3 +224,51 @@ export class Router {
     return element;
   }
 }
+
+// union containing all html elements including user defined elements
+type AnyHTMLElement = HTMLElementTagNameMap[keyof HTMLElementTagNameMap];
+
+function isDynamicRouteElement(
+  element: AnyHTMLElement | DynamicRouteInterface<any>,
+  route: ParsedRoute
+): element is DynamicRouteInterface<any> {
+  return route.parameter !== undefined && "setParameters" in element;
+}
+
+type RouteParameters<T extends string> =
+  // recursive case
+  T extends `${string}:${infer Param}/${infer Rest}`
+    ? { [K in Param | keyof RouteParameters<Rest>]: string }
+    : T extends `${string}:${infer Param}`
+    ? { [K in Param]: string }
+    : {}; // base case when there are no parameters left
+
+export declare class DynamicRouteInterface<T> {
+  parameters?: T;
+  setParameters(parameters: T): void;
+}
+
+// see https://lit.dev/docs/composition/mixins/#mixins-in-typescript
+type Constructor<T = {}> = new (...args: any[]) => T;
+export const DynamicRoute = <
+  T extends Constructor<LitElement>,
+  P extends string
+>(
+  superClass: T,
+  fullPath: P
+) => {
+  type Params = RouteParameters<P>;
+
+  class DynamicRouteMixin
+    extends superClass
+    implements DynamicRouteInterface<Params>
+  {
+    parameters?: Params;
+
+    public setParameters(parameters: Params) {
+      this.parameters = parameters;
+    }
+  }
+
+  return DynamicRouteMixin as Constructor<DynamicRouteInterface<Params>> & T;
+};

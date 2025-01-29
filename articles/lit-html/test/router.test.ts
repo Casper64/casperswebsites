@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { Route, Router } from "../src/lib/router";
+import { DynamicRoute, Route, Router } from "../src/lib/router";
+import { html, LitElement } from "lit";
+import { customElement } from "lit/decorators.js";
 
 const routes: Route[] = [
   {
@@ -51,13 +53,30 @@ const routes: Route[] = [
       },
     ],
   },
+  {
+    path: "dynamic",
+    children: [
+      {
+        path: ":id",
+        // @ts-ignore we don't want to declare this element globally in typescript
+        component: "test-dynamic-route",
+      },
+    ],
+  },
 ];
+
+@customElement("test-dynamic-route")
+class TestDynamicRoute extends DynamicRoute(LitElement, "/dynamic/:id") {
+  protected render() {
+    return html`<p>${this.parameters?.id}</p>`;
+  }
+}
 
 describe("Router init", () => {
   const router = new Router(routes);
 
-  it("Throws render error when root is not mounted", () => {
-    expect(() => router.render("/")).rejects.toThrow("Call mount first");
+  it("Throws render error when root is not mounted", async () => {
+    await expect(() => router.render("/")).rejects.toThrow("Call mount first");
   });
 
   it("Renders when root is mounted", async () => {
@@ -129,6 +148,18 @@ describe("Parse route", () => {
       },
     });
   });
+
+  it("Can match a dynamic route", async () => {
+    const route = await router.render("/dynamic/123");
+    expect(route).toMatchObject({
+      path: "dynamic",
+      child: {
+        path: ":id",
+        parameter: "123",
+        component: "test-dynamic-route",
+      },
+    });
+  });
 });
 
 describe("Render route DOM", () => {
@@ -181,5 +212,14 @@ describe("Render route DOM", () => {
 
     const [_2, changes2] = await Reflect.get(router, "_DOMChanges");
     expect(changes2).toBeUndefined;
+  });
+
+  it("Can render a dynamic route without a parent component", async () => {
+    await router.render("/dynamic/456");
+
+    expect(root.innerHTML).toBe("<test-dynamic-route></test-dynamic-route>");
+
+    const shadowRootHtml = root.firstElementChild?.shadowRoot?.innerHTML;
+    expect(shadowRootHtml).toContain("456</p>");
   });
 });
