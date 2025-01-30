@@ -24,45 +24,51 @@ function parseRoute(
   path: string,
   routes: Map<string, TransformedRoute>
 ): ParsedRoute | undefined {
-  // get all segments between "/" in the `path` and remove any empty string
+  // 1. get all segments between "/" in the `path` and remove any empty strings
   const segments = path.split("/").filter((segment) => !!segment.length);
 
-  /** Recursively match a route segment against a subset of routes */
+  /** 3-6 Recursively match a route segment against a subset of routes */
   const matchSegment = (
-    innerSegments: string[],
+    remainingSegments: string[],
     childRoutes?: Map<string, TransformedRoute>
   ): ParsedRoute | undefined => {
-    // base case when there are no child routes
+    // 3. base case when there are no child routes to end the recursion
     if (!childRoutes || !childRoutes.size) {
-      // check if there are still any segments left. If that is the case
+      // 3.1 check if there are still any segments left. If that is the case
       // the DFS could not resolve all segments meaning a proper match is not found
-      if (innerSegments.length) throw new Error("404");
+      if (remainingSegments.length) throw new Error("404");
+      // 3.2 there are no segments and child routes left. We can end the search here
       return;
     }
 
-    const segment = innerSegments.at(0);
+    // 4. safely get the next segment, is undefined if there is no segment left
+    const segment = remainingSegments.at(0);
+
     if (segment) {
       for (const [key, route] of childRoutes.entries()) {
         const isNormalRoute = segment === key;
         const isDynamic = segment && key.startsWith(":");
 
         if (isNormalRoute || isDynamic) {
+          // 5. found a matching route
           return {
             path: route.path,
             component: route.component,
+            // we only want to set the parameter if the route is dynamic
             parameter: isDynamic ? segment : undefined,
             // recursively get children and remove the first segment
-            child: matchSegment(innerSegments.slice(1), route.children),
+            child: matchSegment(remainingSegments.slice(1), route.children),
           };
         }
       }
     }
 
-    // no matching routes found. Render the "default" path if it exists
+    // 6.1 no matching routes found. Return the "default" path if it exists
     const defaultRoute = childRoutes.get("");
     if (defaultRoute === undefined) {
-      // there is no matching route. But the route has children. That means
-      // that the end of DFS is not reached, meaning the route does not exist.
+      // 6.2 no default route found, but there are no segments so we can end the search
+      if (!remainingSegments.length) return;
+      // 7. There is no matching route
       throw new Error("404");
     }
 
@@ -70,10 +76,11 @@ function parseRoute(
       path: defaultRoute.path,
       component: defaultRoute.component,
       // recursively get children
-      child: matchSegment(innerSegments, defaultRoute.children),
+      child: matchSegment(remainingSegments, defaultRoute.children),
     };
   };
 
+  // 2. start the recursion with all segments and all routes
   return matchSegment(segments, routes);
 }
 
@@ -83,7 +90,7 @@ export class Router {
   private _currentRoute?: ParsedRoute;
   private _DOMChanges?: Promise<[ParsedRoute, (() => void) | undefined]>;
 
-  constructor(routes: Route[]) {
+  public constructor(routes: Route[]) {
     // recursively convert the array into an object to make it faster to lookup
     // routes in `parseRoute`
     const transform = (routes: Route[]): Map<string, TransformedRoute> => {
@@ -102,11 +109,18 @@ export class Router {
     this._routes = transform(routes);
   }
 
+  /**
+   * Set the routers mount point and perform an initial render.
+   * @param rootElement the element to mount the router to
+   */
   public mount(rootElement: HTMLElement) {
     this._rootElement = rootElement;
     this.render("/");
   }
 
+  /**
+   * Render a path and its children to the DOM.
+   */
   public async render(path: string) {
     const renderPromise = new Promise<[ParsedRoute, (() => void) | undefined]>(
       (resolve, reject) => {

@@ -109,11 +109,7 @@ describe("Parse route", () => {
     });
   });
 
-  it("Layout route with children must match children", async () => {
-    // /default exists, but it has a default child ("") which has a child
-    // meaning that child must be matched
-    await expect(() => router.render("/default")).rejects.toThrow("404");
-
+  it("Layout route as a child", async () => {
     const route = await router.render("/default/span");
     expect(route).toMatchObject({
       path: "default",
@@ -125,6 +121,17 @@ describe("Parse route", () => {
           path: "span",
           component: "span",
         },
+      },
+    });
+
+    const route2 = await router.render("/default");
+    expect(route2).toMatchObject({
+      path: "default",
+      component: "div",
+      child: {
+        path: "",
+        component: "div",
+        child: undefined,
       },
     });
   });

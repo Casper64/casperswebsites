@@ -6,21 +6,27 @@ import "./pages/other";
 import "./pages/dynamic";
 
 const routes: Route[] = [
+  // We have defined 1 root route with an empty path attribute
+  // This means that this route is always rendered and serves as a layout.
   {
     path: "",
     component: "main-layout",
     children: [
+      // Matches "/" and renders the home-page component
       {
         path: "",
         component: "home-page",
       },
+      // Matches "/other" and renders the other-page component
       {
         path: "other",
         component: "other-page",
       },
+      // This route has no component and can be used to define nested routes
       {
         path: "dynamic",
         children: [
+          // This route is a dynamic route that will match any segment that follows after "dynamic/"
           {
             path: ":id",
             component: "dynamic-page",
@@ -28,17 +34,7 @@ const routes: Route[] = [
         ],
       },
     ],
-    //
   },
 ];
 
 export const router = new Router(routes);
-
-// slots: {
-//   navigation: {
-//     default: '',
-//     children: [{
-//       path: ""
-//     }]
-//   }
-// }
