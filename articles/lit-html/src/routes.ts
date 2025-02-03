@@ -19,19 +19,14 @@ const routes: Route[] = [
       },
       // Matches "/other" and renders the other-page component
       {
-        path: "other",
+        path: "/other",
         component: "other-page",
       },
       // This route has no component and can be used to define nested routes
       {
-        path: "dynamic",
-        children: [
-          // This route is a dynamic route that will match any segment that follows after "dynamic/"
-          {
-            path: ":id",
-            component: "dynamic-page",
-          },
-        ],
+        // This route is a dynamic route that will match any segment that follows after "dynamic/"
+        path: "/dynamic/:id",
+        component: "dynamic-page",
       },
     ],
   },

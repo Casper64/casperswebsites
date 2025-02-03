@@ -9,7 +9,7 @@ export type Route = {
 type TransformedRoute = {
   path: string;
   component?: keyof HTMLElementTagNameMap;
-  children?: Map<string, TransformedRoute>;
+  parents?: TransformedRoute[];
 };
 
 type ParsedRoute = {
@@ -20,93 +20,152 @@ type ParsedRoute = {
   child?: ParsedRoute;
 };
 
-function parseRoute(
-  path: string,
-  routes: Map<string, TransformedRoute>
-): ParsedRoute | undefined {
-  // 1. get all segments between "/" in the `path` and remove any empty strings
-  const segments = path.split("/").filter((segment) => !!segment.length);
+const getFullPath = (...routes: TransformedRoute[]): string =>
+  routes
+    .map((route) =>
+      route.path.startsWith("/") ? route.path.slice(1) : route.path
+    )
+    .filter((path) => !!path.length)
+    .join("/");
 
-  /** 3-6 Recursively match a route segment against a subset of routes */
-  const matchSegment = (
-    remainingSegments: string[],
-    childRoutes?: Map<string, TransformedRoute>
-  ): ParsedRoute | undefined => {
-    // 3. base case when there are no child routes to end the recursion
-    if (!childRoutes || !childRoutes.size) {
-      // 3.1 check if there are still any segments left. If that is the case
-      // the DFS could not resolve all segments meaning a proper match is not found
-      if (remainingSegments.length) throw new Error("404");
-      // 3.2 there are no segments and child routes left. We can end the search here
-      return;
-    }
+function transformRoutes(routes: Route[]): {
+  normal: Map<string, TransformedRoute>;
+  dynamic: Map<string, TransformedRoute>;
+} {
+  const normal = new Map<string, TransformedRoute>();
+  const dynamic = new Map<string, TransformedRoute>();
 
-    // 4. safely get the next segment, is undefined if there is no segment left
-    const segment = remainingSegments.at(0);
+  const transform = (routes: Route[], parents?: TransformedRoute[]) => {
+    for (let i = 0; i < routes.length; i++) {
+      const route = routes[i];
 
-    if (segment) {
-      for (const [key, route] of childRoutes.entries()) {
-        const isNormalRoute = segment === key;
-        const isDynamic = segment && key.startsWith(":");
+      const fullPath = getFullPath(...(parents ?? []), route);
+      const isDynamic = fullPath.includes(":");
 
-        if (isNormalRoute || isDynamic) {
-          // 5. found a matching route
-          return {
-            path: route.path,
-            component: route.component,
-            // we only want to set the parameter if the route is dynamic
-            parameter: isDynamic ? segment : undefined,
-            // recursively get children and remove the first segment
-            child: matchSegment(remainingSegments.slice(1), route.children),
-          };
-        }
+      const parent: TransformedRoute = {
+        path: getFullPath(route),
+        component: route.component,
+        parents,
+      };
+      if (isDynamic) dynamic.set(fullPath, parent);
+      else normal.set(fullPath, parent);
+
+      if (route.children) {
+        transform(route.children, parents ? [parent, ...parents] : [parent]);
       }
     }
-
-    // 6.1 no matching routes found. Return the "default" path if it exists
-    const defaultRoute = childRoutes.get("");
-    if (defaultRoute === undefined) {
-      // 6.2 no default route found, but there are no segments so we can end the search
-      if (!remainingSegments.length) return;
-      // 7. There is no matching route
-      throw new Error("404");
-    }
-
-    return {
-      path: defaultRoute.path,
-      component: defaultRoute.component,
-      // recursively get children
-      child: matchSegment(remainingSegments, defaultRoute.children),
-    };
   };
+  transform(routes);
 
-  // 2. start the recursion with all segments and all routes
-  return matchSegment(segments, routes);
+  return {
+    normal,
+    dynamic,
+  };
 }
 
+function parseRoutes(
+  transformed: Map<string, TransformedRoute>
+): Map<string, ParsedRoute> {
+  const parsedRoutes = new Map<string, ParsedRoute>();
+  for (const [path, route] of transformed.entries()) {
+    if (route.parents) {
+      let child: ParsedRoute = {
+        path: route.path,
+        component: route.component,
+      };
+
+      for (let i = 0; i < route.parents.length; i++) {
+        const parent = route.parents[i];
+        child = {
+          path: parent.path,
+          component: parent.component,
+          child,
+        };
+      }
+
+      parsedRoutes.set(path, child);
+    } else {
+      parsedRoutes.set(path, {
+        path: route.path,
+        component: route.component,
+      });
+    }
+  }
+
+  return parsedRoutes;
+}
+
+const between = (str: string, start: string, end: string) => {
+  let result = str;
+  if (result.startsWith(start)) result = result.slice(1);
+  if (result.endsWith(end)) result = result.slice(0, -1);
+  return result;
+};
+
+function matchRoute(
+  path: string,
+  normalRoutes: Map<string, ParsedRoute>,
+  dynamicRoutes: Map<string, ParsedRoute>
+): ParsedRoute | undefined {
+  // remove the first '/' if it exists
+  let normalisedPath = between(path, "/", "/");
+
+  const normalRoute = normalRoutes.get(normalisedPath);
+  // return a clone of the object so we don't accidentally mutate the original
+  if (normalRoute) return structuredClone(normalRoute);
+
+  const pathSegments = normalisedPath.split("/");
+
+  routeLoop: for (const [key, route] of dynamicRoutes.entries()) {
+    const routeSegments = key.split("/");
+    // can never be a match
+    if (routeSegments.length !== pathSegments.length) continue;
+
+    const parameterEntries: [string, string][] = [];
+
+    for (let i = 0; i < routeSegments.length; i++) {
+      const segment = routeSegments[i];
+      // check if the segment is dynamic
+      if (segment.startsWith(":")) {
+        parameterEntries.push([segment.slice(1), pathSegments[i]]);
+      }
+      // not a match if a non-dynamic segment does not match the segment in the path
+      else if (segment !== pathSegments[i]) continue routeLoop;
+    }
+
+    let child = route as ParsedRoute | undefined;
+    // attach paramters to child routes
+    while (child) {
+      if (child.path.includes(":")) {
+        // parameters are stored in order
+        child.parameter = parameterEntries.shift()![1];
+      }
+
+      child = child.child;
+    }
+
+    return structuredClone(route);
+  }
+}
+
+const getDynamicSegment = (path: string): string | undefined =>
+  path
+    .split("/")
+    .find((segment) => segment.startsWith(":"))
+    ?.slice(1);
+
 export class Router {
-  private _routes: Map<string, TransformedRoute>;
+  private _routes: Map<string, ParsedRoute>;
+  private _dynamicRoutes: Map<string, ParsedRoute>;
   private _rootElement?: HTMLElement;
   private _currentRoute?: ParsedRoute;
   private _DOMChanges?: Promise<[ParsedRoute, (() => void) | undefined]>;
 
   public constructor(routes: Route[]) {
-    // recursively convert the array into an object to make it faster to lookup
-    // routes in `parseRoute`
-    const transform = (routes: Route[]): Map<string, TransformedRoute> => {
-      const routeMap = new Map<string, TransformedRoute>();
-      for (let i = 0; i < routes.length; i++) {
-        const route = routes[i];
-        routeMap.set(route.path, {
-          ...route,
-          children: route.children ? transform(route.children) : undefined,
-        });
-      }
+    const { normal, dynamic } = transformRoutes(routes);
 
-      return routeMap;
-    };
-
-    this._routes = transform(routes);
+    this._routes = parseRoutes(normal);
+    this._dynamicRoutes = parseRoutes(dynamic);
   }
 
   /**
@@ -126,7 +185,7 @@ export class Router {
       (resolve, reject) => {
         if (!this._rootElement) reject(new Error("Call mount first"));
 
-        const parsedRoute = parseRoute(path, this._routes);
+        const parsedRoute = matchRoute(path, this._routes, this._dynamicRoutes);
         if (!parsedRoute) {
           // no matching routes found!
           throw new Error(`No matching routes for path "${path}"`);
@@ -183,13 +242,15 @@ export class Router {
       // old root is the same, so it should not be removed
 
       // set the root element to be the old root element
-      const oldRootElement = oldRootNode!!;
-      route.root = new WeakRef(oldRootElement);
+      const oldRootElement = oldRootNode;
+      if (oldRootElement) {
+        route.root = new WeakRef(oldRootElement);
+      }
 
       // if the route has a child we should check if any of its children have changed
       if (route.child) {
         return this._traverseRoutes(
-          oldRootElement,
+          oldRootElement ?? rootElement,
           route.child,
           oldRoute?.child
         );
@@ -226,7 +287,7 @@ export class Router {
 
     if (isDynamicRouteElement(element, route)) {
       // remove the ":" from the parameter name
-      const paramName = route.path.slice(1);
+      const paramName = getDynamicSegment(route.path)!;
       parameters[paramName] = route.parameter!;
       // set the parameters on the element
       element.setParameters(parameters as unknown as any);
