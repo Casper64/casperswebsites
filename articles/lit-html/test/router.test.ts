@@ -74,6 +74,7 @@ class TestDynamicRoute extends DynamicRoute(LitElement, "/dynamic/:id") {
 
 describe("Router init", () => {
   const router = new Router(routes);
+  router.useRequestAnimationFrame = false;
 
   it("Throws render error when root is not mounted", async () => {
     await expect(() => router.render("/")).rejects.toThrow("Call mount first");
@@ -83,18 +84,19 @@ describe("Router init", () => {
     const root = document.createElement("div");
     document.body.appendChild(root);
 
-    router.mount(root);
+    await router.mount(root, false);
 
     expect(() => router.render("/")).not.toThrow();
   });
 });
 
-describe("Render route DOM", () => {
+describe("Render route DOM", async () => {
   const router = new Router(routes);
+  router.useRequestAnimationFrame = false;
 
   const root = document.createElement("div");
   document.body.appendChild(root);
-  router.mount(root);
+  await router.mount(root, false);
 
   it("Can render the default route", async () => {
     await router.render("/");
@@ -120,7 +122,7 @@ describe("Render route DOM", () => {
     router.render("/span");
     router.render("/p");
     // use reflection to await the internal promise
-    await Reflect.get(router, "_DOMChanges");
+    await Reflect.get(router, "_renderPromise");
 
     expect(root.innerHTML).toBe("<p></p>");
   });
@@ -130,15 +132,21 @@ describe("Render route DOM", () => {
     await router.render("/");
 
     await router.render("/p");
-    const [_1, changes1] = await Reflect.get(router, "_DOMChanges");
+    const { applyChanges: changes1 } = await Reflect.get(
+      router,
+      "_renderPromise"
+    );
     expect(changes1).toBeDefined();
     expect(root.innerHTML).toBe("<p></p>");
 
     await router.render("/p");
-    expect(root.innerHTML).toBe("<p></p>");
+    window.requestAnimationFrame(() => expect(root.innerHTML).toBe("<p></p>"));
 
-    const [_2, changes2] = await Reflect.get(router, "_DOMChanges");
-    expect(changes2).toBeUndefined;
+    const { applyChanges: changes2 } = await Reflect.get(
+      router,
+      "_renderPromise"
+    );
+    expect(changes2).toBeUndefined();
   });
 
   it("Can render a dynamic route without a parent component", async () => {

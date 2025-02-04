@@ -14,7 +14,7 @@ const routes: Route[] = [
     children: [
       // Matches "/" and renders the home-page component
       {
-        path: "",
+        path: "/",
         component: "home-page",
       },
       // Matches "/other" and renders the other-page component

@@ -1,215 +1,267 @@
 import { LitElement } from "lit";
 
+type ComponentTagName = keyof HTMLElementTagNameMap;
+
 export type Route = {
   path: string;
-  component?: keyof HTMLElementTagNameMap;
+  component?: ComponentTagName;
   children?: Route[];
 };
 
 type TransformedRoute = {
   path: string;
-  component?: keyof HTMLElementTagNameMap;
-  parents?: TransformedRoute[];
+  component?: ComponentTagName;
 };
 
 type ParsedRoute = {
   path: string;
   parameter?: string;
-  component?: keyof HTMLElementTagNameMap;
+  component?: ComponentTagName;
   root?: WeakRef<HTMLElement>;
-  child?: ParsedRoute;
 };
 
-const getFullPath = (...routes: TransformedRoute[]): string =>
-  routes
-    .map((route) =>
-      route.path.startsWith("/") ? route.path.slice(1) : route.path
-    )
-    .filter((path) => !!path.length)
-    .join("/");
-
-function transformRoutes(routes: Route[]): {
-  normal: Map<string, TransformedRoute>;
-  dynamic: Map<string, TransformedRoute>;
-} {
-  const normal = new Map<string, TransformedRoute>();
-  const dynamic = new Map<string, TransformedRoute>();
-
-  const transform = (routes: Route[], parents?: TransformedRoute[]) => {
-    for (let i = 0; i < routes.length; i++) {
-      const route = routes[i];
-
-      const fullPath = getFullPath(...(parents ?? []), route);
-      const isDynamic = fullPath.includes(":");
-
-      const parent: TransformedRoute = {
-        path: getFullPath(route),
-        component: route.component,
-        parents,
-      };
-      if (isDynamic) dynamic.set(fullPath, parent);
-      else normal.set(fullPath, parent);
-
-      if (route.children) {
-        transform(route.children, parents ? [parent, ...parents] : [parent]);
-      }
-    }
-  };
-  transform(routes);
-
-  return {
-    normal,
-    dynamic,
-  };
-}
-
-function parseRoutes(
-  transformed: Map<string, TransformedRoute>
-): Map<string, ParsedRoute> {
-  const parsedRoutes = new Map<string, ParsedRoute>();
-  for (const [path, route] of transformed.entries()) {
-    if (route.parents) {
-      let child: ParsedRoute = {
-        path: route.path,
-        component: route.component,
-      };
-
-      for (let i = 0; i < route.parents.length; i++) {
-        const parent = route.parents[i];
-        child = {
-          path: parent.path,
-          component: parent.component,
-          child,
-        };
-      }
-
-      parsedRoutes.set(path, child);
-    } else {
-      parsedRoutes.set(path, {
-        path: route.path,
-        component: route.component,
-      });
-    }
-  }
-
-  return parsedRoutes;
-}
-
-const between = (str: string, start: string, end: string) => {
+/**
+ * Trim the start and ending of `str` using the values for `start`
+ * and `end` respectively
+ */
+const trim = (str: string, start: string, end: string) => {
   let result = str;
   if (result.startsWith(start)) result = result.slice(1);
   if (result.endsWith(end)) result = result.slice(0, -1);
   return result;
 };
 
+/**
+ * Joins all the paths together to create a full path and removes any
+ * double slashes from the path
+ */
+const getFullPath = (...routes: TransformedRoute[]): string =>
+  routes
+    // remove any leading and trailing slashes
+    .map((route) => trim(route.path, "/", "/"))
+    // filter out any empty strings
+    .filter((path) => !!path.length)
+    .join("/");
+
+/**
+ * Convert a nested array of routes into a flat map of all possible routes.
+ * Separating normal routes from dynamic routes
+ */
+function transformRoutes(routes: Route[]): {
+  normal: Map<string, TransformedRoute[]>;
+  dynamic: Map<string, TransformedRoute[]>;
+} {
+  const normal = new Map<string, TransformedRoute[]>();
+  const dynamic = new Map<string, TransformedRoute[]>();
+
+  const transform = (routes: Route[], parents?: TransformedRoute[]) => {
+    for (let i = 0; i < routes.length; i++) {
+      const route = routes[i];
+      // 1. get the full path of the route including any parents
+      const fullPath = getFullPath(...(parents ?? []), route);
+      // 2. create a new parent object
+      const newParent: TransformedRoute = {
+        path: getFullPath(route),
+        component: route.component,
+      };
+      // 3. create array of all parents from highest to lowest (in the tree)
+      const allParents = parents ? [...parents, newParent] : [newParent];
+      // 4. check if the route is dynamic and add it to the correct map
+      const isDynamic = fullPath.includes(":");
+      if (isDynamic) dynamic.set(fullPath, allParents);
+      else normal.set(fullPath, allParents);
+      // 5. do the same for all the children of the current route
+      if (route.children) {
+        transform(route.children, allParents);
+      }
+    }
+  };
+  transform(routes);
+
+  return { normal, dynamic };
+}
+
+/**
+ * Matches the given path to a route and returns the parsed route with parameters
+ * @returns the components that match the given path and undefined
+ * if no match is found the function returns undefined
+ */
 function matchRoute(
   path: string,
-  normalRoutes: Map<string, ParsedRoute>,
-  dynamicRoutes: Map<string, ParsedRoute>
-): ParsedRoute | undefined {
-  // remove the first '/' if it exists
-  let normalisedPath = between(path, "/", "/");
+  normalRoutes: Map<string, TransformedRoute[]>,
+  dynamicRoutes: Map<string, TransformedRoute[]>
+): ParsedRoute[] | undefined {
+  // remove any leading and trailing slashes
+  const normalisedPath = trim(path, "/", "/");
 
   const normalRoute = normalRoutes.get(normalisedPath);
-  // return a clone of the object so we don't accidentally mutate the original
-  if (normalRoute) return structuredClone(normalRoute);
+  // return the normal route if it is found.
+  // return a clone of the route so we don't accidently change the route in the map
+  if (normalRoute) return structuredClone(normalRoute) as ParsedRoute[];
 
+  // 1. split the current path into segments
   const pathSegments = normalisedPath.split("/");
-
   routeLoop: for (const [key, route] of dynamicRoutes.entries()) {
     const routeSegments = key.split("/");
-    // can never be a match
+    // 2. check if the number of segments are the same,
+    // else the routes don't match
     if (routeSegments.length !== pathSegments.length) continue;
+    // we will collect the parameters in this array
+    const parameters: string[] = [];
 
-    const parameterEntries: [string, string][] = [];
-
+    // 3. loop over all segments. Each segment must either be the same or dynamic
     for (let i = 0; i < routeSegments.length; i++) {
       const segment = routeSegments[i];
-      // check if the segment is dynamic
-      if (segment.startsWith(":")) {
-        parameterEntries.push([segment.slice(1), pathSegments[i]]);
-      }
-      // not a match if a non-dynamic segment does not match the segment in the path
+      // the value of the dynamic segment is equal to the path segment at the same index
+      if (segment.startsWith(":")) parameters.push(pathSegments[i]);
+      // check if the non-dynamic segments are the same,
+      // else the routes don't match
       else if (segment !== pathSegments[i]) continue routeLoop;
     }
 
-    let child = route as ParsedRoute | undefined;
-    // attach paramters to child routes
-    while (child) {
-      if (child.path.includes(":")) {
-        // parameters are stored in order
-        child.parameter = parameterEntries.shift()![1];
+    // create a clone of the route so we don't accidently change the route in the map
+    const routeWithParameters = structuredClone(route) as ParsedRoute[];
+
+    // 4. add the parameters to each dynamic segment
+    let paramIndex = 0;
+    for (let i = 0; i < routeWithParameters.length; i++) {
+      if (routeWithParameters[i].path.includes(":")) {
+        // the parameters are stored in the same order as the segments
+        routeWithParameters[i].parameter = parameters[paramIndex];
+        paramIndex++;
       }
-
-      child = child.child;
     }
-
-    return structuredClone(route);
+    return routeWithParameters;
   }
 }
 
-const getDynamicSegment = (path: string): string | undefined =>
+const getDynamicParamName = (path: string): string | undefined =>
   path
     .split("/")
     .find((segment) => segment.startsWith(":"))
     ?.slice(1);
 
 export class Router {
-  private _routes: Map<string, ParsedRoute>;
-  private _dynamicRoutes: Map<string, ParsedRoute>;
   private _rootElement?: HTMLElement;
-  private _currentRoute?: ParsedRoute;
-  private _DOMChanges?: Promise<[ParsedRoute, (() => void) | undefined]>;
+  private _routes: Map<string, TransformedRoute[]>;
+  private _dynamicRoutes: Map<string, TransformedRoute[]>;
+  private _currentRoutes: ParsedRoute[] = [];
+  private _renderPromise?: Promise<{
+    applyChanges: (() => void) | undefined;
+    parsedRoute: ParsedRoute[];
+  }>;
+  // allow the use of requestAnimationFrame to be disabled for testing purposes
+  public useRequestAnimationFrame = true;
 
   public constructor(routes: Route[]) {
     const { normal, dynamic } = transformRoutes(routes);
-
-    this._routes = parseRoutes(normal);
-    this._dynamicRoutes = parseRoutes(dynamic);
+    this._routes = normal;
+    this._dynamicRoutes = dynamic;
   }
 
   /**
-   * Set the routers mount point and perform an initial render.
+   * Set the routers mount point, performs an initial render and add necessary
+   * event listeners. Remove the event listeners by calling {@link unmount}
    * @param rootElement the element to mount the router to
    */
-  public mount(rootElement: HTMLElement) {
+  public async mount(rootElement: HTMLElement, bindListeners = true) {
     this._rootElement = rootElement;
-    this.render("/");
+
+    if (bindListeners) {
+      document.addEventListener(
+        "click",
+        this._boundHandleClick,
+        // listen to the event in the capture phase (before any other event
+        // listener is executed)
+        true
+      );
+      window.addEventListener("popstate", this._boundHandlePopState);
+    }
+
+    await this.render(bindListeners ? window.location.pathname : "/");
+  }
+
+  /** Click event handler that renders a new route if an anchor element was clicked */
+  private _handleClick(event: MouseEvent) {
+    // 1. get the clicked element using the code below instead of `event.target`,
+    // because `event.target` doesn't propogate through the shadow DOM.
+    const shadowRoot = event.composedPath().at(0);
+    if (!shadowRoot) return;
+    // 2. get the first clicked anchor element
+    const element = (shadowRoot as HTMLElement).closest("a");
+    // 2.1 check if the element is indeed an anchor element
+    if (!element || !(element instanceof HTMLAnchorElement)) return;
+    // 3. extract the href from the anchor element and create a URL object
+    const link = element.href;
+    const url = new URL(link);
+
+    // 4. dont capture events that lead to an outside link
+    if (!link || url.hostname !== window.location.hostname) return;
+    // 5. prevent the navigation from happening
+    event.preventDefault();
+    // 6. render the new route
+    this.render(url.pathname);
+  }
+  // store the bound function so we can remove it later
+  private _boundHandleClick = this._handleClick.bind(this);
+
+  /** Event handler for the windows 'popstate' event. */
+  private _handlePopState(event: PopStateEvent) {
+    event.preventDefault();
+    this.render(window.location.pathname, false);
+  }
+  private _boundHandlePopState = this._handlePopState.bind(this);
+
+  /** Removes all event listeners set in {@link mount} */
+  public unmount() {
+    document.removeEventListener("click", this._boundHandleClick, true);
+    window.removeEventListener("popstate", this._boundHandlePopState);
   }
 
   /**
    * Render a path and its children to the DOM.
    */
-  public async render(path: string) {
-    const renderPromise = new Promise<[ParsedRoute, (() => void) | undefined]>(
-      (resolve, reject) => {
-        if (!this._rootElement) reject(new Error("Call mount first"));
+  public async render(
+    path: string,
+    updateHistory = true
+  ): Promise<ParsedRoute[] | undefined> {
+    const renderPromise = new Promise<{
+      applyChanges: (() => void) | undefined;
+      parsedRoute: ParsedRoute[];
+    }>((resolve, reject) => {
+      // ensure that the user has called `mount` first.
+      if (!this._rootElement) return reject(new Error("Call mount first"));
 
-        const parsedRoute = matchRoute(path, this._routes, this._dynamicRoutes);
-        if (!parsedRoute) {
-          // no matching routes found!
-          throw new Error(`No matching routes for path "${path}"`);
-        }
-        const result = this._traverseRoutes(
-          this._rootElement!,
-          parsedRoute,
-          this._currentRoute
-        );
-        resolve([parsedRoute, result]);
-      }
-    );
-    // keep track of the promise
-    this._DOMChanges = renderPromise;
-    const result = await renderPromise;
+      const parsedRoute = matchRoute(path, this._routes, this._dynamicRoutes);
+      if (!parsedRoute)
+        return reject(new Error(`No route found for path: ${path}`));
+
+      const applyChanges = this._traverseRoutes(
+        this._rootElement!,
+        parsedRoute,
+        this._currentRoutes
+      );
+
+      resolve({ applyChanges, parsedRoute });
+    });
+    // store the render promise
+    this._renderPromise = renderPromise;
+    // await the promise
+    const { applyChanges, parsedRoute } = await renderPromise;
     // check if the promise we started is the same as the one that resolved
-    // if not that means render was called again before the previous render was done
-    // we can ignore the result in that case
-    if (this._DOMChanges !== renderPromise) return;
+    // if not that means render was called again before this one could be applied
+    if (this._renderPromise !== renderPromise) return;
 
-    const [parsedRoute, applyChanges] = result;
-    this._currentRoute = parsedRoute;
+    this._currentRoutes = parsedRoute;
 
-    applyChanges?.();
+    if (!this.useRequestAnimationFrame) applyChanges?.();
+    else if (applyChanges) window.requestAnimationFrame(applyChanges);
+
+    if (updateHistory) {
+      // update the browsers address bar
+      window.history.pushState(null, "", path);
+    }
+
     return parsedRoute;
   }
 
@@ -219,61 +271,68 @@ export class Router {
    */
   private _traverseRoutes(
     rootElement: HTMLElement,
-    route: ParsedRoute,
-    oldRoute?: ParsedRoute
+    routes: ParsedRoute[],
+    oldRoutes: ParsedRoute[] = []
   ): (() => void) | undefined {
-    const shouldBeChanged = oldRoute?.path !== route.path;
-    const parametersChanged = route.parameter !== oldRoute?.parameter;
-    // check if the node still exists in the DOM. If not it should be rerendered
-    const oldRootNode = oldRoute?.root?.deref();
-    const isDisconnectedFromDOM = oldRoute?.root && !oldRootNode?.isConnected;
+    let root = rootElement;
 
-    if (shouldBeChanged || parametersChanged || isDisconnectedFromDOM) {
-      return () => {
-        // remove the old root node and all its children
-        oldRootNode?.remove();
+    for (let i = 0; i < routes.length; i++) {
+      const route = routes[i];
+      // get the counter part of the current route if it exists.
+      const oldRoute = oldRoutes.at(i);
+      // 1. check if the route has changed
+      const pathChanged = oldRoute?.path !== route.path;
+      // 2. check if any route paramer has changed
+      const parametersChanged = route.parameter !== oldRoute?.parameter;
 
-        // create a document framgent so the DOM changes can be applied at once
-        const rootFragment = document.createDocumentFragment();
-        this._doRender(rootFragment, route);
-        rootElement.appendChild(rootFragment);
-      };
-    } else {
-      // old root is the same, so it should not be removed
+      const oldRootNode = oldRoute?.root?.deref();
+      // 3. check if the node still exists in the DOM. If not it should be rerendered
+      const isDisconnectedFromDOM = oldRoute?.root && !oldRootNode?.isConnected;
 
-      // set the root element to be the old root element
-      const oldRootElement = oldRootNode;
-      if (oldRootElement) {
-        route.root = new WeakRef(oldRootElement);
-      }
+      if (pathChanged || parametersChanged || isDisconnectedFromDOM) {
+        return () => {
+          // remove the old root node and all its children
+          oldRootNode?.remove();
 
-      // if the route has a child we should check if any of its children have changed
-      if (route.child) {
-        return this._traverseRoutes(
-          oldRootElement ?? rootElement,
-          route.child,
-          oldRoute?.child
-        );
+          // create a document framgent so the DOM changes can be applied at once
+          const rootFragment = document.createDocumentFragment();
+          // collect the DOM changes in the document fragment before updating the DOM
+          this._doRender(rootFragment, routes.slice(i));
+          root.appendChild(rootFragment);
+        };
+      } else {
+        // no changes need to be made to the DOM for this route
+        const oldRootElement = oldRootNode;
+        if (oldRootElement) {
+          // use a weak ref so the element can be garbage collected when it's removed from the DOM
+          // because it is no longer referenced anywhere.
+          route.root = new WeakRef(oldRootElement);
+          // set the root element to be the old root element
+          root = oldRootElement;
+        }
       }
     }
-
-    // no changes need to be made
   }
 
-  /** Render a `route` and its children then append it to the `rootElement` */
+  /**
+   * Create elements for each route in `routes` and append to result
+   * to the `rootElement`
+   */
   private _doRender(
     rootElement: HTMLElement | DocumentFragment,
-    route: ParsedRoute,
-    parameters: Record<string, string> = {}
+    routes: ParsedRoute[]
   ) {
-    if (route.component) {
-      const newElement = this._createElement(route, parameters);
-      // if the route has a child we need to rerender all children below it
-      if (route.child) this._doRender(newElement, route.child, parameters);
+    const parameters: Record<string, string> = {};
+    let root = rootElement;
 
-      rootElement.appendChild(newElement);
-    } else if (route.child) {
-      this._doRender(rootElement, route.child, parameters);
+    for (let i = 0; i < routes.length; i++) {
+      const route = routes[i];
+      if (!route.component) continue;
+      // create a new instance of the element by its tag name
+      const newElement = this._createElement(route, parameters);
+      root.appendChild(newElement);
+      // set the new root element to be the new element
+      root = newElement;
     }
   }
 
@@ -281,18 +340,20 @@ export class Router {
     route: ParsedRoute,
     parameters: Record<string, string> = {}
   ): HTMLElement {
+    // 0. ensure that a component is defined for this route
     if (!route.component) throw new Error("Component is missing");
-
+    // 1. create the new element
     const element = document.createElement(route.component);
-
+    // 2. TODO: create function that checks if the element is a `DynamicRoute`
     if (isDynamicRouteElement(element, route)) {
-      // remove the ":" from the parameter name
-      const paramName = getDynamicSegment(route.path)!;
+      // 3. TODO: create function that extracts the parameter name from the path
+      const paramName = getDynamicParamName(route.path)!;
+      // 4. mutate the `parameters` object by adding the parameter
       parameters[paramName] = route.parameter!;
-      // set the parameters on the element
-      element.setParameters(parameters as unknown as any);
+      // 5. set the parameters on the element
+      element.setParameters(parameters as InferRouteParameters<typeof element>);
     }
-
+    // 6. set the root element of the ParsedRoute to be the new element
     // use a weak ref so the element can be garbage collected when it's removed from the DOM
     // because it is no longer referenced anywhere.
     route.root = new WeakRef(element);
@@ -303,6 +364,10 @@ export class Router {
 // union containing all html elements including user defined elements
 type AnyHTMLElement = HTMLElementTagNameMap[keyof HTMLElementTagNameMap];
 
+/**
+ * Returns true if `element` is a `DynamicRoute` element and casts the
+ * `element` accordingly
+ */
 function isDynamicRouteElement(
   element: AnyHTMLElement | DynamicRouteInterface<any>,
   route: ParsedRoute
@@ -318,13 +383,20 @@ type RouteParameters<T extends string> =
     ? { [K in Param]: string }
     : {}; // base case when there are no parameters left
 
+// declare a class for a dynamic route class
 export declare class DynamicRouteInterface<T> {
   parameters?: T;
   setParameters(parameters: T): void;
 }
 
+// helper type that extracts the parameters type from a DynamicRoute class
+type InferRouteParameters<T> = T extends DynamicRouteInterface<infer P>
+  ? P
+  : never;
+
 // see https://lit.dev/docs/composition/mixins/#mixins-in-typescript
 type Constructor<T = {}> = new (...args: any[]) => T;
+
 export const DynamicRoute = <
   T extends Constructor<LitElement>,
   P extends string
@@ -332,8 +404,10 @@ export const DynamicRoute = <
   superClass: T,
   fullPath: P
 ) => {
+  // get the params object type from the path string
   type Params = RouteParameters<P>;
-
+  // create a class which extends the super class and also
+  // implements our interface using the params type.
   class DynamicRouteMixin
     extends superClass
     implements DynamicRouteInterface<Params>
@@ -344,6 +418,6 @@ export const DynamicRoute = <
       this.parameters = parameters;
     }
   }
-
+  // cast the class to the correct type
   return DynamicRouteMixin as Constructor<DynamicRouteInterface<Params>> & T;
 };

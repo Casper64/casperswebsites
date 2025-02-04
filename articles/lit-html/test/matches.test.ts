@@ -63,82 +63,97 @@ const childRoutes: Route[] = [
   },
 ];
 
-describe("Parse child routes", () => {
+describe("Parse child routes", async () => {
   const router = new Router(childRoutes);
+  router.useRequestAnimationFrame = false;
 
   const root = document.createElement("div");
   document.body.appendChild(root);
 
-  router.mount(root);
+  await router.mount(root, false);
 
   it("Can match the Layout route", async () => {
     const route = await router.render("/");
-    expect(route).toMatchObject({
-      path: "",
-      component: "main",
-      child: {
+
+    expect(route).toMatchObject([
+      {
+        path: "",
+        component: "main",
+      },
+      {
         path: "",
         component: "article",
       },
-    });
+    ]);
   });
 
   it("Layout route as a child", async () => {
     const route = await router.render("/default/span");
-    expect(route).toMatchObject({
-      path: "default",
-      component: "div",
-      child: {
+    expect(route).toMatchObject([
+      {
+        path: "default",
+        component: "div",
+      },
+      {
         path: "",
         component: "div",
-        child: {
-          path: "span",
-          component: "span",
-        },
       },
-    });
+      {
+        path: "span",
+        component: "span",
+      },
+    ]);
 
     const route2 = await router.render("/default");
-    expect(route2).toMatchObject({
-      path: "default",
-      component: "div",
-      child: {
+
+    expect(route2).toMatchObject([
+      {
+        path: "default",
+        component: "div",
+      },
+      {
         path: "",
         component: "div",
       },
-    });
+    ]);
   });
 
   it("Can match a different root route", async () => {
     const route = await router.render("/span");
-    expect(route).toMatchObject({
-      path: "span",
-      component: "span",
-    });
+    expect(route).toMatchObject([
+      {
+        path: "span",
+        component: "span",
+      },
+    ]);
   });
 
   it("Can match a child route", async () => {
     const route = await router.render("/div/span");
-    expect(route).toMatchObject({
-      path: "div",
-      component: "div",
-      child: {
+    expect(route).toMatchObject([
+      {
+        path: "div",
+        component: "div",
+      },
+      {
         path: "span",
         component: "span",
       },
-    });
+    ]);
   });
 
   it("Can match a dynamic route", async () => {
     const route = await router.render("/dynamic/123");
-    expect(route).toMatchObject({
-      path: "dynamic",
-      child: {
+    expect(route).toMatchObject([
+      {
+        path: "dynamic",
+      },
+      {
         path: ":id",
         parameter: "123",
         component: "test-dynamic-route",
       },
-    });
+    ]);
   });
 });
 
@@ -180,50 +195,59 @@ const fullRoutes: Route[] = [
   },
 ];
 
-describe("Parse full routes", () => {
+describe("Parse full routes", async () => {
   const router = new Router(fullRoutes);
+  router.useRequestAnimationFrame = false;
 
   const root = document.createElement("div");
   document.body.appendChild(root);
 
-  router.mount(root);
+  await router.mount(root, false);
 
   it("Can match a full route", async () => {
     const route = await router.render("/test/hmm/test");
-    expect(route).toMatchObject({
-      path: "test",
-      child: {
+    expect(route).toMatchObject([
+      {
+        path: "test",
+      },
+      {
         path: "hmm/test",
       },
-    });
+    ]);
   });
 
   it("Can match a full route child of a layout", async () => {
     const route = await router.render("/sub/route");
-    expect(route).toMatchObject({
-      path: "",
-      child: {
+    expect(route).toMatchObject([
+      {
+        path: "",
+      },
+      {
         path: "sub/route",
       },
-    });
+    ]);
   });
 
   it("Can match a dynamic full route", async () => {
     const route = await router.render("/dynamic/123");
-    expect(route).toMatchObject({
-      path: "dynamic/:id",
-      parameter: "123",
-    });
+    expect(route).toMatchObject([
+      {
+        path: "dynamic/:id",
+        parameter: "123",
+      },
+    ]);
   });
 
   it("Can match a full dynamic route with child", async () => {
     const route = await router.render("/dynamic/123/sub");
-    expect(route).toMatchObject({
-      path: "dynamic/:id",
-      parameter: "123",
-      child: {
+    expect(route).toMatchObject([
+      {
+        path: "dynamic/:id",
+        parameter: "123",
+      },
+      {
         path: "sub",
       },
-    });
+    ]);
   });
 });

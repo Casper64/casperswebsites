@@ -9,30 +9,10 @@ export class MainLayout extends LitElement {
 
   protected render(): TemplateResult {
     return html`<nav>
-        <!-- <a href="/">Home</a> -->
-        <!-- <a href="/about">About</a> -->
-        <button
-          @click=${() => {
-            router.render("/");
-          }}
-        >
-          Home
-        </button>
-        <button
-          @click=${() => {
-            router.render("/other");
-          }}
-        >
-          Other
-        </button>
-
-        <button
-          @click=${() => {
-            router.render("/error");
-          }}
-        >
-          Not found
-        </button>
+        <a href="/">Home</a>
+        <a href="/other">Other</a>
+        <a href="/not-found">Not found</a>
+        <a target="_blank" href="https://google.com">Google</a>
       </nav>
       <header>
         <input type="text" placeholder="Dynamic part" id="dynamic-nav" />

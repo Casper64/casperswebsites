@@ -3,7 +3,7 @@ import { resolve } from "path";
 
 export default defineConfig((_config) => {
   return {
-    base: "./",
+    base: "/",
     root: "public",
     appType: "spa",
     resolve: {
@@ -16,7 +16,7 @@ export default defineConfig((_config) => {
       rollupOptions: {
         input: resolve(__dirname, "./public/index.html"),
       },
-      outDir: resolve(__dirname, "/dist"),
+      outDir: resolve(__dirname, "./dist"),
       emptyOutDir: true,
     },
     esbuild: {
