@@ -1,0 +1,17 @@
+name: 'spring-boot-dev'
+
+services:
+  db:
+    container_name: 'spring-boot-db-dev'
+    image: postgres
+    restart: always
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: spring
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:
