@@ -1,0 +1,45 @@
+name: 'spring-boot-prod'
+
+services:
+  db:
+    container_name: 'spring-boot-db'
+    image: postgres
+    restart: always
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    container_name: 'spring-boot-backend'
+    build:
+      context: ../backend
+      dockerfile: ../devops/backend.Dockerfile
+    restart: always
+    ports:
+      - '8080:8080'
+    environment:
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
+      SPRING_DATASOURCE_USERNAME: ${DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_JPA_GENERATE-DDL: true
+      FRONTEND_URL: ${FRONTEND_URL}
+    depends_on:
+      - db
+
+  frontend:
+    container_name: 'spring-boot-frontend'
+    build:
+      context: ../frontend
+      dockerfile: ../devops/frontend.Dockerfile
+    image: nginx:latest
+    restart: always
+    ports:
+      - '5173:80'
+
+volumes:
+  postgres_data:
